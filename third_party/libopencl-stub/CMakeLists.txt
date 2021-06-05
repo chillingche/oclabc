@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.2)
-add_library(OpenCL STATIC src/libopencl.c)
+add_definitions(-DCL_TARGET_OPENCL_VERSION=200)
+file(GLOB SRCS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+add_library(OpenCL SHARED ${SRCS})
 target_include_directories(OpenCL PRIVATE "include")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
@@ -9,4 +11,4 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
 endif()
 
 install(TARGETS OpenCL
-        ARCHIVE DESTINATION lib)
+        LIBRARY DESTINATION lib)

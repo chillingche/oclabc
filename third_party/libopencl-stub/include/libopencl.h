@@ -1,7 +1,7 @@
 #ifndef LIBOPENCL_STUB_H
 #define LIBOPENCL_STUB_H
 
-#define CL_TARGET_OPENCL_VERSION 120
+// #define CL_TARGET_OPENCL_VERSION 120
 #include <CL/cl.h>
 #include <CL/cl_gl.h>
 
@@ -230,9 +230,5 @@ typedef cl_mem (*f_clCreateFromGLTexture3D) (cl_context, cl_mem_flags, cl_GLenum
 
 typedef cl_int (*f_clGetGLContextInfoKHR) (const cl_context_properties *, cl_gl_context_info, size_t,
                                         void *, size_t *);
-
-// Additional api to reset currently opened opencl shared-object
-// Subsequent calls will use newly set environment variables
-void stubOpenclReset();
 
 #endif    // LIBOPENCL_STUB_H
