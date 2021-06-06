@@ -10,5 +10,5 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
   target_compile_options(OpenCL PRIVATE -O2 -fPIC -Wall)
 endif()
 
-install(TARGETS OpenCL
-        LIBRARY DESTINATION lib)
+# install(TARGETS OpenCL
+#         LIBRARY DESTINATION lib)

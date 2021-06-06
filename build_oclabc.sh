@@ -29,7 +29,16 @@ make install || exit 1
 cd ${OCLABC_ROOT}
 
 # adb command
-echo "[INFO] push files to the phone: "
-adb shell "mkdir -v /data/local/tmp/wangzhe_r"
-adb push ${OCLABC_ROOT}/install-${platform}/test/* /data/local/tmp/wangzhe_r
-adb push ${OCLABC_ROOT}/src/cl/* /data/local/tmp/wangzhe_r
+ADB_DEVICES=$(adb devices | grep -v List)
+ADB_DIR="/data/local/tmp/oclabc"
+if [[ ${ADB_DEVICES} == "" ]]; then
+    echo "[WARN] found no adb device."
+else
+    if [[ ${ADB_DEVICES} =~ "device" ]]; then
+        ADB_DEVICES=$(echo ${ADB_DEVICES} | head -n 1 | awk {'print $1'})
+    fi
+    echo "[INFO] push files to the device (${ADB_DEVICES}): "
+    adb -s ${ADB_DEVICES} shell "mkdir -v ${ADB_DIR}"
+    adb -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/lib/* ${ADB_DIR}
+    adb -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/examples/* ${ADB_DIR}
+fi
