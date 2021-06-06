@@ -5,8 +5,12 @@ build_threads="8"
 platform=android-aarch64
 
 export OCLABC_ROOT=$(cd `dirname $0` && pwd)
-echo "[INFO] build oclabc in ${OCLABC_ROOT}..."
+echo "[INFO] build oclabc in ${OCLABC_ROOT} ..."
 cd ${OCLABC_ROOT}
+
+if [[ ${ANDROID_NDK_HOME} == "" ]]; then
+    echo "[ERROR] please set variable: ANDROID_NDK_HOME." && exit 0
+fi
 
 options="-DCMAKE_TOOLCHAIN_FILE=${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake \
          -DANDROID_ABI=arm64-v8a \
