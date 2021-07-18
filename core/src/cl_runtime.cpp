@@ -3,7 +3,13 @@
 
 #include <stdio.h>
 
+#ifdef TAG
+#undef TAG
+#endif
+#define TAG "cl_runtime"
+
 namespace abc {
+
 CLRuntime::~CLRuntime() {
     
     if (queue_) {
@@ -25,7 +31,6 @@ CLRuntime::~CLRuntime() {
 }
 
 cl_int CLRuntime::init() {
-    LOGI("%s (+)", __func__);
     cl_int result = 0;
     result = clGetPlatformIDs(1, &platform_, NULL);
     CHECK_ERROR_NO_RETURN(result == CL_SUCCESS, "Failed to get platform id.");
@@ -50,7 +55,11 @@ cl_int CLRuntime::init() {
                           "Failed to create command queue.");
 
     queue_ = NULL;
-    LOGI("%s (-)", __func__);
     return result;
 }
+
+CLRuntime &clrt() {
+    return CLRuntime::instance();
+}
+
 }  // namespace abc

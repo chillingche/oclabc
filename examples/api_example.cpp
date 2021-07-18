@@ -5,8 +5,6 @@
 #include <string>
 #include <vector>
 
-#include "CL/cl.h"
-
 using abc::clrt;
 
 int main(int argc, char const* argv[]) {

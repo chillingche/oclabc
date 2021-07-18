@@ -7,3 +7,4 @@ BasedOnStyle: Chromium
 # 'int>>' if the file already contains at least one such instance.)
 Standard: Cpp11
 IndentWidth: 4
+PointerAlignment: Right

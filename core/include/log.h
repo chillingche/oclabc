@@ -1,11 +1,11 @@
-#include <stdio.h>
-
 #ifndef _LOG_H_
 #define _LOG_H_
 
 #ifndef TAG
 #define TAG "OCLABC"
 #endif
+
+#include <stdio.h>
 
 #define LOGD(MSG, ...) do { \
     printf("[DEBUG] [OCLABC][" TAG "] " MSG "\n", ##__VA_ARGS__); \

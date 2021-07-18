@@ -1,12 +1,11 @@
-#include "CL/cl.h"
-
 #ifndef _CL_RUNTIME_
 #define _CL_RUNTIME_
 
-#ifdef TAG
-#undef TAG
-#endif
-#define TAG "cl_runtime"
+#define __SHARP(X) #X
+#define _STR(X) __SHARP(X)
+
+#define CL_TARGET_OPENCL_VERSION 200
+#include "CL/cl.h"
 
 namespace abc {
 
@@ -38,12 +37,8 @@ class CLRuntime {
     cl_command_queue profile_queue_;
 };
 
-namespace {
-CLRuntime& clrt() {
-    return CLRuntime::instance();
-}
+CLRuntime& clrt();
 
-}  // namespace
 }  // namespace abc
 
 #endif
