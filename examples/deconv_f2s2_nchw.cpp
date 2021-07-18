@@ -29,6 +29,7 @@ std::string makeGEMMKernelString() {
                                        __global half *output) {
             const int idx = get_global_id(0) << 2;  // ih * iw
             const int idy = get_global_id(1) << 2;  // oc * 4
+            if (idx >= N || idy >= M) return;
             half4 cval[4];
             cval[0] = (half4)(0);
             cval[1] = (half4)(0);
@@ -51,7 +52,7 @@ std::string makeGEMMKernelString() {
     return kernel;
 }
 
-std::string makeDeconvKernelString() {
+std::string makeDeconvKernelW4String() {
     // local = {16, 16}
     // global = {(ih * iw + 3) / 4, (oc * 2 * 2 + 3) / 4}
     std::string kernel = _STR(
@@ -69,7 +70,7 @@ std::string makeDeconvKernelString() {
                                        __global half *output) {
             const int idx = get_global_id(0) << 2;  // ih * iw
             const int idy = get_global_id(1) << 2;  // oc * 4
-            if (idx > N || idy > M) return;
+            if (idx >= N || idy >= M) return;
             half4 cval[4];
             cval[0] = (half4)(0);
             cval[1] = (half4)(0);
@@ -99,12 +100,104 @@ std::string makeDeconvKernelString() {
     return kernel;
 }
 
+std::string makeDeconvKernelString() {
+    // local = {16, 16}
+    // global = {(ih * iw + 3) / 4, (oc * 2 * 2 + 3) / 4}
+    std::string kernel = _STR(
+        __kernel void deconv_f2s2_nchw(int ic,
+                                       int ih,
+                                       int iw,
+                                       int oc,
+                                       int oh,
+                                       int ow,
+                                       int M,
+                                       int N,
+                                       int K,
+                                       __global const half *input,
+                                       __global const half *weight,
+                                       __global half *output) {
+            const int idx = get_global_id(0) << 2;  // ih * iw
+            const int idy = get_global_id(1) << 2;  // oc * 4
+            if (idx >= N || idy >= M) return;
+            int iw_idx = idx % iw;
+            int oc_idx = idy / 4;
+            int ih_idx = (idx / iw) % ih;
+            int oh_idx = ih_idx * 2;
+            int ow_idx = iw_idx * 2;
+            int out_pos = oc_idx * oh * ow + oh_idx * ow + ow_idx;
+            half4 cval[4];
+            cval[0] = (half4)(0);
+            cval[1] = (half4)(0);
+            cval[2] = (half4)(0);
+            cval[3] = (half4)(0);
+            for (int ki = 0; ki < K; ++ki) {
+                half4 weight_val = vload4(0, weight + ki * M + idy);
+                half4 input_val = vload4(0, input + ki * N + idx);
+                cval[0] += weight_val.x * input_val;
+                cval[1] += weight_val.y * input_val;
+                cval[2] += weight_val.z * input_val;
+                cval[3] += weight_val.w * input_val;
+            }
+            char iw_remain = ((iw_idx + 4) <= iw) ? 4 : (iw & 3);
+            if (iw_remain == 4) {
+                vstore8((half8)(cval[0].x, cval[1].x, cval[0].y, cval[1].y, cval[0].z, cval[1].z, cval[0].w, cval[1].w), 0, output + out_pos);
+                vstore8((half8)(cval[2].x, cval[3].x, cval[2].y, cval[3].y, cval[2].z, cval[3].z, cval[2].w, cval[3].w), 0, output + out_pos + ow);
+            } else {
+                /*if (iw_remain == 3) {
+                    half3 cval[4];
+                    cval[0] = (half3)(0);
+                    cval[1] = (half3)(0);
+                    cval[2] = (half3)(0);
+                    cval[3] = (half3)(0);
+                    for (int ki = 0; ki < K; ++ki) {
+                        half4 weight_val = vload4(0, weight + ki * M + idy);
+                        half3 input_val = vload3(0, input + ki * N + idx);
+                        cval[0] += weight_val.x * input_val;
+                        cval[1] += weight_val.y * input_val;
+                        cval[2] += weight_val.z * input_val;
+                        cval[3] += weight_val.w * input_val;
+                    }
+                    vstore4((half4)(cval[0].x, cval[1].x, cval[0].y, cval[1].y), 0, output + out_pos);
+                    vstore2((half2)(cval[0].z, cval[1].z), 0, output + out_pos + 4);
+                    vstore4((half4)(cval[2].x, cval[3].x, cval[2].y, cval[3].y), 0, output + out_pos + ow);
+                    vstore2((half2)(cval[2].z, cval[3].z), 0, output + out_pos + ow + 4);
+                } else */
+                if (iw_remain == 2) {
+                    vstore4((half4)(cval[0].x, cval[1].x, cval[0].y, cval[1].y), 0, output + out_pos);
+                    vstore4((half4)(cval[2].x, cval[3].x, cval[2].y, cval[3].y), 0, output + out_pos + ow);
+                    vstore4((half4)(cval[0].z, cval[1].z, cval[0].w, cval[1].w), 0, output + out_pos + ow + 4);
+                    vstore4((half4)(cval[2].z, cval[3].z, cval[2].w, cval[3].w), 0, output + out_pos + ow * 2 + 4);
+                }
+                /* else if (iw_remain == 1) {
+                    half cval[4];
+                    cval[0] = (half)(0);
+                    cval[1] = (half)(0);
+                    cval[2] = (half)(0);
+                    cval[3] = (half)(0);
+                    for (int ki = 0; ki < K; ++ki) {
+                        half4 weight_val = vload4(0, weight + ki * M + idy);
+                        half input_val = input[ki * N + idx];
+                        cval[0] += weight_val.x * input_val;
+                        cval[1] += weight_val.y * input_val;
+                        cval[2] += weight_val.z * input_val;
+                        cval[3] += weight_val.w * input_val;
+                    }
+                    vstore2((half2)(cval[0], cval[1]), 0, output + out_pos);
+                    vstore2((half2)(cval[2], cval[3]), 0, output + out_pos + ow);
+                }*/
+            }
+        }
+    );
+    return kernel;
+}
+
 using abc::Tensor;
 using abc::clrt;
 int main(int argc, char const *argv[])
 {
     clrt().init();
-    int ic = 8, ih = 60, iw = 60, oc = 8, oh = 120, ow = 120;
+    int ic = 8, ih = 30, iw = 30;
+    int oc = 8, oh = 60, ow = 60;
     int M = oc * 2 * 2;
     int K = ic;
     int N = ih * iw;
@@ -137,8 +230,12 @@ int main(int argc, char const *argv[])
         LOGE("clCreateProgramWithSource failed.");
     }
 
-    cl_uint WD = 2;
-    size_t GLOBAL_WORK_SIZE[] = {static_cast<size_t>((N + 3) / 4), static_cast<size_t>((M + 3) / 4)};
+    cl_uint wd = 2;
+    size_t global[] = {static_cast<size_t>((N + 3) / 4), static_cast<size_t>((M + 3) / 4)};
+    size_t local[] = {32, 16};
+    for (int i = 0; i < wd; ++i) {
+        global[i] = (global[i] + local[i] - 1) / local[i] * local[i];
+    }
 
     ret = clBuildProgram(program, 1, &deviceId, 0, 0, 0);
     assert(ret == CL_SUCCESS);
@@ -176,15 +273,16 @@ int main(int argc, char const *argv[])
     ret = clSetKernelArg(kernel, 11, sizeof(cl_mem), &output_tensor.gptr);
     assert(ret == CL_SUCCESS);
 
-    ret = clEnqueueNDRangeKernel(clrt().profileQueue(), kernel, WD, NULL,
-                                 GLOBAL_WORK_SIZE, NULL, 0, NULL, NULL);
+    ret = clEnqueueNDRangeKernel(clrt().profileQueue(), kernel, wd, NULL,
+                                 global, local, 0, NULL, NULL);
     assert(ret == CL_SUCCESS);
 
     abc::copyFP16CLMemToHostMem(output_tensor.numElem(), output_tensor.gptr, output_tensor.hostptr);
     cl_half *outptr = reinterpret_cast<cl_half *>(output_tensor.hostptr);
-    for (int i = 0; i < output_tensor.numElem(); ++i) {
-        printf("%f ", to_float(outptr[i]));
-        if ((i + 1) % 8 == 0) printf("\n");
+    int numElem = output_tensor.numElem();
+    for (int i = 0; i < numElem; ++i) {
+        printf("%f\n", to_float(outptr[i]));
+        // if ((i + 1) % 60 == 0) printf("\n");
     }
     printf("\n");
 
