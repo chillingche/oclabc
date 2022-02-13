@@ -13,3 +13,7 @@ add_executable(deconv_f2s2_nchw deconv_f2s2_nchw.cpp)
 target_link_libraries(deconv_f2s2_nchw oclabc_core)
 install(TARGETS deconv_f2s2_nchw
         RUNTIME DESTINATION examples)
+
+add_executable(gflops gflops.cpp)
+install(TARGETS gflops
+        RUNTIME DESTINATION examples)
