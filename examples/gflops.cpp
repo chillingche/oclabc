@@ -5,17 +5,35 @@
 #include <unistd.h>
 #include "log.h"
 
-inline int set_thread_affinity(int num)
+static int set_thread_affinity(int num)
 {
     cpu_set_t mask;
     CPU_ZERO(&mask);
     CPU_SET(num, &mask);
     int status = syscall(__NR_sched_setaffinity, gettid(), sizeof(mask), &mask);
     if (status) {
-        LOGE("fail to set affinity %d\n", status);
+        LOGE("fail to set affinity %d", status);
         return -1;
     }
+    LOGI("bind core %d", num);
     return 0;
+}
+
+static void set_thread_affinity_big() {
+    set_thread_affinity(7);
+}
+
+static void set_thread_affinity_mid() {
+    set_thread_affinity(6);
+    set_thread_affinity(5);
+    set_thread_affinity(4);
+}
+
+static void set_thread_affinity_small() {
+    set_thread_affinity(3);
+    set_thread_affinity(2);
+    set_thread_affinity(1);
+    set_thread_affinity(0);
 }
 
 void mvm_row_kernel(uint32_t N, uint32_t K, float *matrix, float *vector, float *result)
@@ -100,7 +118,7 @@ void mvm_row_kernel(uint32_t N, uint32_t K, float *matrix, float *vector, float 
                  "v17", "v18");
 }
 
-void freefma(int64_t loop)
+static void freefma_a53(int64_t loop, int64_t *num_mac)
 {
     asm volatile(
         "mov x9, %0\n"
@@ -114,130 +132,151 @@ void freefma(int64_t loop)
         "bne 0b\n"
         :
         : "r"(loop)
-        : "memory", "cc", "x9", "v0", "v1", "v2", "v3", "v4",
+        : "x9", "v0", "v1", "v2", "v3", "v4",
           "v12", "v13");
+    *num_mac = 5 * 4;
+}
+
+static void freefma_f16_a55(int64_t loop, int64_t *num_mac)
+{
+    asm volatile(
+        "mov x9, %0\n"
+        "0:\n"
+        "fmla v0.8h,  v12.8h, v13.h[0]\n"
+        "fmla v1.8h,  v12.8h, v13.h[1]\n"
+        "fmla v2.8h,  v12.8h, v13.h[2]\n"
+        "fmla v3.8h,  v12.8h, v13.h[3]\n"
+        "subs x9, x9, #1\n"
+        "fmla v4.8h,  v12.8h, v13.h[4]\n"
+        "bne 0b\n"
+        :
+        : "r"(loop)
+        : "x9", "v0", "v1", "v2", "v3", "v4", "v12", "v13");
+    *num_mac = 5 * 8;
+}
+
+static void freefma_a76(int64_t loop, int64_t *num_mac)
+{
+    asm volatile(
+        "mov x9, %0\n"
+        "0:\n"
+        "fmla v0.4s,  v12.4s, v13.s[0]\n"
+        "fmla v1.4s,  v12.4s, v13.s[1]\n"
+        "fmla v2.4s,  v12.4s, v13.s[2]\n"
+        "fmla v3.4s,  v12.4s, v13.s[3]\n"
+        "subs x9, x9, #1\n"
+        "fmla v4.4s,  v12.4s, v13.s[0]\n"
+        "fmla v5.4s,  v12.4s, v13.s[1]\n"
+        "fmla v6.4s,  v12.4s, v13.s[2]\n"
+        "fmla v7.4s,  v12.4s, v13.s[3]\n"
+        "bne 0b\n"
+        :
+        : "r"(loop)
+        : "x9", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
+          "v12", "v13");
+    *num_mac = 8 * 4;
+}
+
+static void freefma_x1(int64_t loop, int64_t *num_mac)
+{
+    asm volatile(
+        "mov x9, %0\n"
+        "0:\n"
+        "fmla v0.4s,  v12.4s, v13.s[0]\n"
+        "fmla v1.4s,  v12.4s, v13.s[1]\n"
+        "fmla v2.4s,  v12.4s, v13.s[2]\n"
+        "fmla v3.4s,  v12.4s, v13.s[3]\n"
+
+        "fmla v4.4s,  v12.4s, v13.s[0]\n"
+        "fmla v5.4s,  v12.4s, v13.s[1]\n"
+        "fmla v6.4s,  v12.4s, v13.s[2]\n"
+        "fmla v7.4s,  v12.4s, v13.s[3]\n"
+
+        "subs x9, x9, #1\n"
+
+        "fmla v8.4s,  v12.4s, v13.s[0]\n"
+        "fmla v9.4s,  v12.4s, v13.s[1]\n"
+        "fmla v10.4s,  v12.4s, v13.s[2]\n"
+        "fmla v11.4s,  v12.4s, v13.s[3]\n"
+
+        "fmla v14.4s,  v12.4s, v13.s[0]\n"
+        "fmla v15.4s,  v12.4s, v13.s[1]\n"
+        "fmla v16.4s,  v12.4s, v13.s[2]\n"
+        "fmla v17.4s,  v12.4s, v13.s[3]\n"
+        "bne 0b\n"
+        :
+        : "r"(loop)
+        : "x9", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7",
+          "v12", "v13", "v14", "v15", "v16", "v17");
+    *num_mac = 16 * 4;
 }
 
 int main(int argc, char const *argv[])
 {
     int64_t loop = 1024 * 1024 * 1024;
-    float macs = loop * 5 * (4.0f + 4.0f);
+    int64_t warmup = 1024 * 1024;
     {
-        set_thread_affinity(0);
+        set_thread_affinity_small();
+        int64_t macs = 0;
+        freefma_a53(warmup, &macs);
         timeval begin, end;
         gettimeofday(&begin, NULL);
-        freefma(loop);
+        freefma_a53(loop, &macs);
         gettimeofday(&end, NULL);
         float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
                    (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
+        float gfp = loop * macs * 2.0f / lt * 1000.0f / 1000.0f /
                     1000.0f / 1000.0f;
         LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
+        LOGI("F32 GFLOPS: %.4f", gfp);
     }
 
     {
-        set_thread_affinity(1);
+        set_thread_affinity_small();
+        int64_t macs = 0;
+        freefma_f16_a55(warmup, &macs);
         timeval begin, end;
         gettimeofday(&begin, NULL);
-        freefma(loop);
+        freefma_f16_a55(loop, &macs);
         gettimeofday(&end, NULL);
         float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
                    (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
+        float gfp = loop * macs * 2.0f / lt * 1000.0f / 1000.0f /
                     1000.0f / 1000.0f;
         LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
+        LOGI("F16 GFLOPS: %.4f", gfp);
     }
 
     {
-        set_thread_affinity(2);
-        
+        set_thread_affinity_mid();
+        int64_t macs = 0;
+        freefma_a76(warmup, &macs);
         timeval begin, end;
         gettimeofday(&begin, NULL);
-        freefma(loop);
+        freefma_a76(loop, &macs);
         gettimeofday(&end, NULL);
         float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
                    (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
+        float gfp = loop * macs * 2.0f / lt * 1000.0f / 1000.0f /
                     1000.0f / 1000.0f;
         LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
+        LOGI("F32 GFLOPS: %.4f", gfp);
     }
 
     {
-        set_thread_affinity(3);
-        
+        set_thread_affinity_big();
+        int64_t macs = 0;
+        freefma_a76(warmup, &macs);
         timeval begin, end;
         gettimeofday(&begin, NULL);
-        freefma(loop);
+        freefma_a76(loop, &macs);
         gettimeofday(&end, NULL);
         float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
                    (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
+        float gfp = loop * macs * 2.0f / lt * 1000.0f / 1000.0f /
                     1000.0f / 1000.0f;
         LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
-    }
-
-    {
-        set_thread_affinity(4);
-        
-        timeval begin, end;
-        gettimeofday(&begin, NULL);
-        freefma(loop);
-        gettimeofday(&end, NULL);
-        float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
-                   (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
-                    1000.0f / 1000.0f;
-        LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
-    }
-
-    {
-        set_thread_affinity(5);
-        
-        timeval begin, end;
-        gettimeofday(&begin, NULL);
-        freefma(loop);
-        gettimeofday(&end, NULL);
-        float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
-                   (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
-                    1000.0f / 1000.0f;
-        LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
-    }
-
-    {
-        set_thread_affinity(6);
-        
-        timeval begin, end;
-        gettimeofday(&begin, NULL);
-        freefma(loop);
-        gettimeofday(&end, NULL);
-        float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
-                   (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
-                    1000.0f / 1000.0f;
-        LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
-    }
-
-    {
-        set_thread_affinity(7);
-        
-        timeval begin, end;
-        gettimeofday(&begin, NULL);
-        freefma(loop);
-        gettimeofday(&end, NULL);
-        float lt = (end.tv_sec - begin.tv_sec) * 1000.0f +
-                   (end.tv_usec - begin.tv_usec) / 1000.0f;
-        float gfp = macs / lt * 1000.0f / 1000.0f /
-                    1000.0f / 1000.0f;
-        LOGI("time elapsed: %.4f ms", lt);
-        LOGI("GFLOPS: %.4f", gfp);
+        LOGI("F32 GFLOPS: %.4f", gfp);
     }
 
     return 0;
