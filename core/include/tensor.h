@@ -6,7 +6,7 @@
 #endif
 #define TAG "tensor"
 
-#include <string>
+#include <stdlib.h>
 
 #include "cl_runtime.h"
 #include "type.h"
@@ -16,20 +16,15 @@ namespace abc {
 struct Tensor {
     Tensor() : hostptr(nullptr), gptr(nullptr) {}
     ~Tensor();
-    std::size_t numElem();
+    std::size_t num_elem();
     dims4d dims;
     void *hostptr;
     cl_mem gptr;
 };
 
-Tensor make4DTensor(const dims4d &dims);
-void allocTensorHostMem(Tensor *t);
-cl_int allocTensorCLMem(Tensor *t);
-cl_int copyFP16HostMemToCLMem(std::size_t numElem, const void *from, cl_mem to);
-cl_int copyFP16CLMemToHostMem(std::size_t numElem, cl_mem from, void *to);
-void readFP16FromFP32Text(const std::string &filename,
-                          std::size_t numElem,
-                          void *f16ptr);
+Tensor make_4d_tensor(const dims4d &dims);
+void alloc_tensor_host_mem(Tensor *t);
+cl_int alloc_tensor_cl_mem(Tensor *t);
 
 }  // namespace abc
 

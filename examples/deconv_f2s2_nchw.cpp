@@ -4,6 +4,7 @@
 #include "log.h"
 #include "tensor.h"
 #include "half_float.h"
+#include "utils.h"
 
 #ifdef TAG
 #undef TAG
@@ -201,33 +202,29 @@ int main(int argc, char const *argv[])
     int M = oc * 2 * 2;
     int K = ic;
     int N = ih * iw;
-    Tensor input_tensor = abc::make4DTensor({1, ic, ih, iw});
-    Tensor weight_tensor = abc::make4DTensor({ic, oc, 2, 2});
-    Tensor output_tensor = abc::make4DTensor({1, oc, oh, ow});
+    Tensor input_tensor = abc::make_4d_tensor({1, ic, ih, iw});
+    Tensor weight_tensor = abc::make_4d_tensor({ic, oc, 2, 2});
+    Tensor output_tensor = abc::make_4d_tensor({1, oc, oh, ow});
 
-    abc::allocTensorHostMem(&input_tensor);
-    abc::allocTensorCLMem(&input_tensor);
-    abc::readFP16FromFP32Text("input.txt", input_tensor.numElem(), input_tensor.hostptr);
+    abc::alloc_tensor_host_mem(&input_tensor);
+    abc::alloc_tensor_cl_mem(&input_tensor);
+    // abc::read_fp16_from_fp32_text("input.txt", input_tensor.num_elem(), input_tensor.hostptr);
+    abc::init_fp16_host_mem(input_tensor.num_elem(), abc::UT_INIT_RANDOM, input_tensor.hostptr);
 
-    abc::allocTensorHostMem(&weight_tensor);
-    abc::allocTensorCLMem(&weight_tensor);
-    abc::readFP16FromFP32Text("weight.txt", weight_tensor.numElem(), weight_tensor.hostptr);
+    abc::alloc_tensor_host_mem(&weight_tensor);
+    abc::alloc_tensor_cl_mem(&weight_tensor);
+    // abc::read_fp16_from_fp32_text("weight.txt", weight_tensor.num_elem(), weight_tensor.hostptr);
+    abc::init_fp16_host_mem(weight_tensor.num_elem(), abc::UT_INIT_RANDOM, weight_tensor.hostptr);
 
-    abc::allocTensorHostMem(&output_tensor);
-    abc::allocTensorCLMem(&output_tensor);
+    abc::alloc_tensor_host_mem(&output_tensor);
+    abc::alloc_tensor_cl_mem(&output_tensor);
 
     cl_int ret = CL_SUCCESS;
-    std::string kernelStr = "#pragma OPENCL EXTENSION cl_khr_fp16 : enable\n";
-    kernelStr += makeDeconvKernelString();
-    const char *str = kernelStr.c_str();
 
     // Setup the kernel
-    cl_device_id deviceId = clrt().deviceId();
-    cl_program program = NULL;
-    cl_kernel kernel   = NULL;
-    program = clCreateProgramWithSource(clrt().context(), 1, &str, NULL, &ret);
+    cl_kernel kernel = clrt().create_kernel("deconv_f2s2_nchw", makeDeconvKernelString().c_str(), NULL, &ret);
     if (CL_SUCCESS != ret) {
-        LOGE("clCreateProgramWithSource failed.");
+        LOGE("create_kernel failed.");
     }
 
     cl_uint wd = 2;
@@ -237,55 +234,24 @@ int main(int argc, char const *argv[])
         global[i] = (global[i] + local[i] - 1) / local[i] * local[i];
     }
 
-    ret = clBuildProgram(program, 1, &deviceId, 0, 0, 0);
+    abc::copy_fp16_host_mem_to_cl_mem(input_tensor.num_elem(), input_tensor.hostptr, input_tensor.gptr);
+    abc::copy_fp16_host_mem_to_cl_mem(weight_tensor.num_elem(), weight_tensor.hostptr, weight_tensor.gptr);
+
+    ret = abc::set_kernel_args(kernel, ic, ih, iw, oc, oh, ow, M, N, K, input_tensor.gptr, weight_tensor.gptr, output_tensor.gptr);
     assert(ret == CL_SUCCESS);
 
-    kernel = clCreateKernel(program, "deconv_f2s2_nchw",  &ret);
-    assert(ret == CL_SUCCESS);
-    clReleaseProgram(program);
-
-    abc::copyFP16HostMemToCLMem(input_tensor.numElem(), input_tensor.hostptr, input_tensor.gptr);
-    abc::copyFP16HostMemToCLMem(weight_tensor.numElem(), weight_tensor.hostptr, weight_tensor.gptr);
-
-    ret = clSetKernelArg(kernel, 0, sizeof(int), &ic);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 1, sizeof(int), &ih);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 2, sizeof(int), &iw);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 3, sizeof(int), &oc);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 4, sizeof(int), &oh);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 5, sizeof(int), &ow);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 6, sizeof(int), &M);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 7, sizeof(int), &N);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 8, sizeof(int), &K);
-    assert(ret == CL_SUCCESS);
-
-    ret = clSetKernelArg(kernel, 9, sizeof(cl_mem), &input_tensor.gptr);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 10, sizeof(cl_mem), &weight_tensor.gptr);
-    assert(ret == CL_SUCCESS);
-    ret = clSetKernelArg(kernel, 11, sizeof(cl_mem), &output_tensor.gptr);
-    assert(ret == CL_SUCCESS);
-
-    ret = clEnqueueNDRangeKernel(clrt().profileQueue(), kernel, wd, NULL,
+    ret = clEnqueueNDRangeKernel(clrt().profile_queue(), kernel, wd, NULL,
                                  global, local, 0, NULL, NULL);
     assert(ret == CL_SUCCESS);
 
-    abc::copyFP16CLMemToHostMem(output_tensor.numElem(), output_tensor.gptr, output_tensor.hostptr);
+    abc::copy_fp16_cl_mem_to_host_mem(output_tensor.num_elem(), output_tensor.gptr, output_tensor.hostptr);
     cl_half *outptr = reinterpret_cast<cl_half *>(output_tensor.hostptr);
-    int numElem = output_tensor.numElem();
-    for (int i = 0; i < numElem; ++i) {
+    int num_elem = output_tensor.num_elem();
+    for (int i = 0; i < num_elem && i < 8; ++i) {
         printf("%f\n", to_float(outptr[i]));
         // if ((i + 1) % 60 == 0) printf("\n");
     }
     printf("\n");
 
-    clReleaseKernel(kernel);
     return 0;
 }

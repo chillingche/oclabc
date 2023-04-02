@@ -33,7 +33,12 @@ make install || exit 1
 cd ${OCLABC_ROOT}
 
 # adb command
-ADB_DEVICES=$(adb devices | grep -v List)
+USE_IP=""
+if [[ $hostip != "" ]]; then
+    USE_IP="-H $hostip"
+fi
+
+ADB_DEVICES=$(adb ${USE_IP} devices | grep -v List)
 ADB_DIR="/data/local/tmp/oclabc"
 if [[ ${ADB_DEVICES} == "" ]]; then
     echo "[WARN] found no adb device."
@@ -42,7 +47,7 @@ else
         ADB_DEVICES=$(echo ${ADB_DEVICES} | head -n 1 | awk {'print $1'})
     fi
     echo "[INFO] push files to the device (${ADB_DEVICES}): "
-    adb -s ${ADB_DEVICES} shell "mkdir -v ${ADB_DIR}"
-    adb -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/lib/* ${ADB_DIR}
-    adb -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/examples/* ${ADB_DIR}
+    adb ${USE_IP} -s ${ADB_DEVICES} shell "mkdir -v ${ADB_DIR}"
+    adb ${USE_IP} -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/lib/* ${ADB_DIR}
+    adb ${USE_IP} -s ${ADB_DEVICES} push ${OCLABC_ROOT}/install-${platform}/examples/* ${ADB_DIR}
 fi
